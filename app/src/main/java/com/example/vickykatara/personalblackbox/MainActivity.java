@@ -11,19 +11,21 @@ import android.os.Bundle;
 import android.widget.CompoundButton;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.example.vickykatara.personalblackbox.types.AbsoluteEmergency;
 import com.example.vickykatara.personalblackbox.types.DangerousSituation;
 import com.example.vickykatara.personalblackbox.types.Distraction;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
-    public static final double PRESSURE_CHANGE_THRESHOLD = 0.05;
+    public static final double PRESSURE_CHANGE_THRESHOLD = 0.000015;
+    private static final boolean DEBUG_MODE_ON = true;
+
+    private boolean pressureNotCapturedYet = false;
 
     private boolean mockPressure = false;
     private boolean mockSound = false;
@@ -154,40 +156,44 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     void checkEmergencySituations() {
-
+        if(DEBUG_MODE_ON) makeAlertDialog("Checking Emergency");
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
         Sensor sensor = event.sensor;
         if (sensor.getType() == Sensor.TYPE_PRESSURE) {
-            double newPressureValue = event.values[0];
-            if(percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD) {
-                absoluteEmergencyList.add(AbsoluteEmergency.PRESSURE_CHANGE);
-                this.checkEmergencySituations();
-            } else {
-                absoluteEmergencyList.remove(AbsoluteEmergency.PRESSURE_CHANGE);
-            }
-            lastCapturedPressure = newPressureValue;
-            updatePressure();
+            checkPressureChange(event.values[0]);
         }
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
+    private void checkPressureChange(float newPressureValue) {
+        if(percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD && pressureNotCapturedYet) {
+            absoluteEmergencyList.add(AbsoluteEmergency.PRESSURE_CHANGE);
+            checkEmergencySituations();
+        } else {
+            absoluteEmergencyList.remove(AbsoluteEmergency.PRESSURE_CHANGE);
+            pressureNotCapturedYet = true;
+        }
+        lastCapturedPressure = newPressureValue;
+        updatePressureStrings();
+    }
+
     private double percentChange(double lastCapturedPressure, double newPressureValue) {
+        if(DEBUG_MODE_ON) makeAlertDialog("Old Hg:"+lastCapturedPressure+", new Hg: "+newPressureValue);
         return Math.abs(lastCapturedPressure-newPressureValue)/lastCapturedPressure;
     }
 
-    private void updatePressure() {
+    private void updatePressureStrings() {
         if(noPressureSensor) {
             ((TextView) findViewById(R.id.pressureTextView)).setText("No Pressure Sensor");
             return;
         }
         if (mockPressure == false) {
             ((TextView) findViewById(R.id.pressureTextView)).setText(String.format("%.5f", 0.0295301d*lastCapturedPressure) + " mmHg");
-            checkEmergencySituations();
         }
     }
 
@@ -202,5 +208,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         // Be sure to unregister the sensor when the activity pauses.
         super.onPause();
         mSensorManager.unregisterListener(this);
+    }
+
+    public void makeAlertDialog(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 }
