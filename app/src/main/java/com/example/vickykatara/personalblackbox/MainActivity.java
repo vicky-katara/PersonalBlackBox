@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.app.BundleCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.widget.CompoundButton;
@@ -29,9 +30,9 @@ import java.util.Set;
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
-    public static final double PRESSURE_CHANGE_THRESHOLD = 0.001;
-    private static final boolean DEBUG_MODE_ON = true;
-    private static final double SOUND_AMPLITUDE_THRESHOLD = 80;
+    public static final double PRESSURE_CHANGE_THRESHOLD = 0.00008;
+    public static final boolean DEBUG_MODE_ON = true;
+    private static final double SOUND_AMPLITUDE_THRESHOLD = 10000; // Range 0:32768
 
     private boolean pressureNotCapturedYet = false;
     private boolean soundNotCapturedYet = false;
@@ -43,7 +44,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean mockOrientation = false;
     private boolean mockKeyboardDrawn = false;
 
-    private double lastCapturedPressure;
+    private double lastCapturedPressure, newPressure;
     private double lastCapturedSound;
     private Location lastCapturedLocation;
 
@@ -59,6 +60,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean noPressureSensor = false;
 
     private Thread soundGenerator;
+    private Handler soundHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -167,6 +169,19 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 }
         );
 
+        createSoundHandler();
+
+    }
+
+    private void createSoundHandler() {
+        checkPermission();
+        soundHandler = new Handler() {
+            public void handleMessage(Message msg) {
+                double amplitude = msg.getData().getDouble("amplitude");
+                if(amplitude > 0)
+                    checkSoundEmergency(amplitude);
+            }
+        };
     }
 
     void checkEmergencySituations() {
@@ -177,7 +192,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     public void onSensorChanged(SensorEvent event) {
         Sensor sensor = event.sensor;
         if (sensor.getType() == Sensor.TYPE_PRESSURE && mockPressure == false) {
-            System.out.println(")))))))))))))))))))))))))) MockPressure:"+mockPressure);
+//            System.out.println(")))))))))))))))))))))))))) MockPressure:"+mockPressure);
             checkPressureChange(event.values[0]);
         }
     }
@@ -186,29 +201,31 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
     private void checkPressureChange(float newPressureValue) {
+        newPressure = newPressureValue;
         if(percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD && pressureNotCapturedYet) {
-//            if(DEBUG_MODE_ON) makeAlertDialog("Old Hg:"+lastCapturedPressure+", new Hg: "+newPressureValue+" mockPressure:"+mockPressure);
+            if(DEBUG_MODE_ON) makeAlertDialog("Sudden Pressure Change Detected");
             absoluteEmergencyList.add(AbsoluteEmergency.PRESSURE_CHANGE);
             checkEmergencySituations();
+            updatePressureStrings(true);
         } else {
             absoluteEmergencyList.remove(AbsoluteEmergency.PRESSURE_CHANGE);
             pressureNotCapturedYet = true;
+            updatePressureStrings(false);
         }
         lastCapturedPressure = newPressureValue;
-        updatePressureStrings();
     }
 
     private double percentChange(double lastCapturedPressure, double newPressureValue) {
         return Math.abs(lastCapturedPressure-newPressureValue)/lastCapturedPressure;
     }
 
-    private void updatePressureStrings() {
+    private void updatePressureStrings(boolean isDanger) {
         if(noPressureSensor) {
             ((TextView) findViewById(R.id.pressureTextView)).setText("No Pressure Sensor");
             return;
         }
         if (mockPressure == false) {
-            ((TextView) findViewById(R.id.pressureTextView)).setText(String.format("%.5f", lastCapturedPressure) + " hPa (millibar)");
+            ((TextView) findViewById(R.id.pressureTextView)).setText(String.format("%.3f", newPressure) + " hPa (millibar)"+(isDanger?" !!! ":""));
         }
     }
 
@@ -216,17 +233,18 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         if(amplitude > SOUND_AMPLITUDE_THRESHOLD && soundNotCapturedYet) {
             absoluteEmergencyList.add(AbsoluteEmergency.LARGE_NOISE);
             checkEmergencySituations();
+            updateSoundStrings(true);
         } else {
             absoluteEmergencyList.remove(AbsoluteEmergency.LARGE_NOISE);
             soundNotCapturedYet = true;
+            updateSoundStrings(false);
         }
         lastCapturedSound = amplitude;
-        updateSoundStrings();
     }
 
-    private void updateSoundStrings() {
+    private void updateSoundStrings(boolean isDanger) {
         if (mockSound == false) {
-            ((TextView) findViewById(R.id.soundTextView)).setText(lastCapturedSound + " dB");
+            ((TextView) findViewById(R.id.soundTextView)).setText(lastCapturedSound + " dB"+(isDanger ? " !!! " : ""));
         }
     }
 
@@ -244,41 +262,54 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     public void makeAlertDialog(String message) {
-//        if(message.toUpperCase().contains("EMER"))
-//            System.err.println("******             dialog" + message);
-//        else
-//            System.out.println("******             dialog" + message);
+        if(message.toUpperCase().contains("EMER"))
+            System.err.println("******             dialog" + message);
+        else
+            System.out.println("******             dialog" + message);
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
     private class SoundCaptureThread implements Runnable {
-        Handler handler;
         SoundMeter meter = new SoundMeter();
         @Override
         public void run() {
-            Looper.prepare();
-            handler = new Handler() {
-                public void handleMessage(Message msg) {
-                    System.out.println(msg);
-                }
-            };
-            Looper.loop();
             while (true) {
-                meter.start();
+                if(mockSound) {
+                    try {
+                        Thread.sleep(5000);
+                        continue;
+                    } catch (InterruptedException e) {
+                    }
+                }
+                try {
+                    meter.start();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    continue;
+                }
 
                 try {
-                    Thread.sleep(200);
+                    Thread.sleep(5000);
                 } catch (InterruptedException e) {
                 }
 
                 double amplitude = meter.getAmplitude();
-                System.out.println("****     Amplitude:"+amplitude);
-                meter.stop();
-
-//                if (DEBUG_MODE_ON) makeAlertDialog("Captured Sound: " + amplitude);
-                checkSoundEmergency(amplitude);
                 try {
-                    Thread.sleep(2000); // change to 60000
+                    meter.stop();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    continue;
+                }
+                Bundle bundle = new Bundle();
+                bundle.putDouble("amplitude", amplitude);
+
+                Message message = new Message();
+                message.setData(bundle);
+
+                soundHandler.sendMessage(message);
+
+                try {
+                    Thread.sleep(200); // change to 60000
                 } catch (InterruptedException e) {
                 }
             }
