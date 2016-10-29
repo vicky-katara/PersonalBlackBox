@@ -1,13 +1,17 @@
 package com.example.vickykatara.personalblackbox;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.location.Location;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -15,6 +19,8 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.BundleCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.telephony.PhoneStateListener;
+import android.telephony.TelephonyManager;
 import android.widget.CompoundButton;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -24,13 +30,18 @@ import com.example.vickykatara.personalblackbox.types.AbsoluteEmergency;
 import com.example.vickykatara.personalblackbox.types.DangerousSituation;
 import com.example.vickykatara.personalblackbox.types.Distraction;
 import com.example.vickykatara.personalblackbox.utils.SoundMeter;
+import com.google.android.gms.appindexing.Action;
+import com.google.android.gms.appindexing.AppIndex;
+import com.google.android.gms.appindexing.Thing;
+import com.google.android.gms.common.api.GoogleApiClient;
 
 import java.util.HashSet;
 import java.util.Set;
 
-public class MainActivity extends AppCompatActivity implements SensorEventListener {
+public class MainActivity extends AppCompatActivity
+        implements SensorEventListener {
 
-    public static final double PRESSURE_CHANGE_THRESHOLD = 0.00008;
+    public static final double PRESSURE_CHANGE_THRESHOLD = 0.0008;
     public static final boolean DEBUG_MODE_ON = true;
     private static final double SOUND_AMPLITUDE_THRESHOLD = 10000; // Range 0:32768
 
@@ -45,8 +56,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean mockKeyboardDrawn = false;
 
     private double lastCapturedPressure, newPressure;
-    private double lastCapturedSound;
+    private int lastCapturedSound;
     private Location lastCapturedLocation;
+    private boolean isOnCall;
 
     private Set<AbsoluteEmergency> absoluteEmergencyList;
     private Set<DangerousSituation> dangerousSituationsList;
@@ -62,6 +74,16 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private Thread soundGenerator;
     private Handler soundHandler;
 
+    private BroadcastReceiver broadcastReceiver;
+    private PhoneStateListener phoneStateListener;
+
+    private TelephonyManager telephonyManager;
+    /**
+     * ATTENTION: This was auto-generated to implement the App Indexing API.
+     * See https://g.co/AppIndexing/AndroidStudio for more information.
+     */
+    private GoogleApiClient client;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -73,7 +95,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         mPressure = mSensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
-        if(mPressure == null)
+        if (mPressure == null)
             noPressureSensor = true;
 
         soundGenerator = new Thread(new SoundCaptureThread());
@@ -89,6 +111,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                             checkEmergencySituations();
                         } else {
                             mockPressure = false;
+                            updatePressureStrings(true);
                         }
                     }
                 }
@@ -104,6 +127,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                             checkEmergencySituations();
                         } else {
                             mockSound = false;
+                            updateSoundStrings(true);
                         }
                     }
                 }
@@ -119,6 +143,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                             checkEmergencySituations();
                         } else {
                             mockCall = false;
+                            updateOnCallStrings();
                         }
                     }
                 }
@@ -169,8 +194,22 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 }
         );
 
+
         createSoundHandler();
 
+        createCellBroadcastReceiver();
+
+        // ATTENTION: This was auto-generated to implement the App Indexing API.
+        // See https://g.co/AppIndexing/AndroidStudio for more information.
+        client = new GoogleApiClient.Builder(this).addApi(AppIndex.API).build();
+
+        printAllStrings();
+    }
+
+    private void printAllStrings() {
+        this.updatePressureStrings(false);
+        this.updateSoundStrings(false);
+        this.updateOnCallStrings();
     }
 
     private void createSoundHandler() {
@@ -178,7 +217,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         soundHandler = new Handler() {
             public void handleMessage(Message msg) {
                 double amplitude = msg.getData().getDouble("amplitude");
-                if(amplitude > 0)
+                if (amplitude > 0)
                     checkSoundEmergency(amplitude);
             }
         };
@@ -198,12 +237,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+    }
 
     private void checkPressureChange(float newPressureValue) {
         newPressure = newPressureValue;
-        if(percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD && pressureNotCapturedYet) {
-            if(DEBUG_MODE_ON) makeAlertDialog("Sudden Pressure Change Detected");
+        if (percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD && pressureNotCapturedYet) {
+            if (DEBUG_MODE_ON) makeAlertDialog("Sudden Pressure Change Detected");
             absoluteEmergencyList.add(AbsoluteEmergency.PRESSURE_CHANGE);
             checkEmergencySituations();
             updatePressureStrings(true);
@@ -216,42 +256,146 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private double percentChange(double lastCapturedPressure, double newPressureValue) {
-        return Math.abs(lastCapturedPressure-newPressureValue)/lastCapturedPressure;
+        return Math.abs(lastCapturedPressure - newPressureValue) / lastCapturedPressure;
     }
 
     private void updatePressureStrings(boolean isDanger) {
-        if(noPressureSensor) {
+        if (noPressureSensor) {
             ((TextView) findViewById(R.id.pressureTextView)).setText("No Pressure Sensor");
             return;
         }
         if (mockPressure == false) {
-            ((TextView) findViewById(R.id.pressureTextView)).setText(String.format("%.3f", newPressure) + " hPa (millibar)"+(isDanger?" !!! ":""));
+            ((TextView) findViewById(R.id.pressureTextView)).setText(String.format("%.3f", newPressure) + " hPa (millibar)" + (isDanger ? " !!! " : ""));
         }
     }
 
     private void checkSoundEmergency(double amplitude) {
-        if(amplitude > SOUND_AMPLITUDE_THRESHOLD && soundNotCapturedYet) {
+        if (amplitude > SOUND_AMPLITUDE_THRESHOLD && soundNotCapturedYet) {
             absoluteEmergencyList.add(AbsoluteEmergency.LARGE_NOISE);
-            checkEmergencySituations();
             updateSoundStrings(true);
+            checkEmergencySituations();
         } else {
             absoluteEmergencyList.remove(AbsoluteEmergency.LARGE_NOISE);
             soundNotCapturedYet = true;
             updateSoundStrings(false);
         }
-        lastCapturedSound = amplitude;
+        lastCapturedSound = (int)Math.ceil(amplitude);
     }
 
     private void updateSoundStrings(boolean isDanger) {
         if (mockSound == false) {
-            ((TextView) findViewById(R.id.soundTextView)).setText(lastCapturedSound + " dB"+(isDanger ? " !!! " : ""));
+            ((TextView) findViewById(R.id.soundTextView)).setText(String.format("%.2f", ((lastCapturedSound*140.0)/32768.0)) + " dB " + (isDanger ? " !!! " : ""));
         }
+    }
+
+    private void createCellBroadcastReceiver() {
+
+        phoneStateListener = new PhoneStateListener() {
+            @Override
+            public void onCallStateChanged(int state, String incomingNumber) {
+                switch (state) {
+                    case TelephonyManager.CALL_STATE_RINGING:
+                        // called when someone is ringing to this phone
+                        makeAlertDialog("Incoming: "+incomingNumber);
+                        break;
+                }
+            }
+        };
+
+        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+
+        broadcastReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                System.out.println(" >>>>>>>>>>>>>>>>>>>>>>>>>>>>> onReceive: "+action);
+                if (action.equalsIgnoreCase(Intent.ACTION_NEW_OUTGOING_CALL) || action.equalsIgnoreCase(Intent.ACTION_CALL)) {
+                    isOnCall = true;
+                    distractionsList.add(Distraction.ONGOING_CALL);
+                    updateOnCallStrings();
+                    checkEmergencySituations();
+                } else {
+                    isOnCall = false;
+                    checkEmergencySituations();
+                    distractionsList.remove(Distraction.ONGOING_CALL);
+                }
+            }
+        };
+
+        IntentFilter callIntentFilter = new IntentFilter();
+        callIntentFilter.addAction(Intent.ACTION_NEW_OUTGOING_CALL);
+        callIntentFilter.addAction(Intent.ACTION_CALL);
+
+        registerReceiver(broadcastReceiver, callIntentFilter);
+    }
+
+    private void updateOnCallStrings() {
+        if (mockCall == false) {
+            ((TextView) findViewById(R.id.onGoingCallTextView)).setText((isOnCall ? "On Call !!! " : "Not on a Call"));
+        }
+    }
+
+    public void makeAlertDialog(String message) {
+        if (message.toUpperCase().contains("EMER"))
+            System.err.println("******             dialog" + message);
+        else
+            System.out.println("******             dialog" + message);
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * ATTENTION: This was auto-generated to implement the App Indexing API.
+     * See https://g.co/AppIndexing/AndroidStudio for more information.
+     */
+    public Action getIndexApiAction() {
+        Thing object = new Thing.Builder()
+                .setName("Main Page") // TODO: Define a title for the content shown.
+                // TODO: Make sure this auto-generated URL is correct.
+                .setUrl(Uri.parse("http://[ENTER-YOUR-URL-HERE]"))
+                .build();
+        return new Action.Builder(Action.TYPE_VIEW)
+                .setObject(object)
+                .setActionStatus(Action.STATUS_TYPE_COMPLETED)
+                .build();
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+        soundGenerator = new Thread(new SoundCaptureThread());
+        soundGenerator.start();
+        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+        // ATTENTION: This was auto-generated to implement the App Indexing API.
+        // See https://g.co/AppIndexing/AndroidStudio for more information.
+        client.connect();
+        AppIndex.AppIndexApi.start(client, getIndexApiAction());
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
+        soundGenerator.interrupt();
+
+        // ATTENTION: This was auto-generated to implement the App Indexing API.
+        // See https://g.co/AppIndexing/AndroidStudio for more information.
+        AppIndex.AppIndexApi.end(client, getIndexApiAction());
+        client.disconnect();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         mSensorManager.registerListener(this, mPressure, SensorManager.SENSOR_DELAY_NORMAL);
+        soundGenerator = new Thread(new SoundCaptureThread());
+        soundGenerator.start();
+        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
     }
 
     @Override
@@ -259,22 +403,16 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         // Be sure to unregister the sensor when the activity pauses.
         super.onPause();
         mSensorManager.unregisterListener(this);
-    }
-
-    public void makeAlertDialog(String message) {
-        if(message.toUpperCase().contains("EMER"))
-            System.err.println("******             dialog" + message);
-        else
-            System.out.println("******             dialog" + message);
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
     }
 
     private class SoundCaptureThread implements Runnable {
         SoundMeter meter = new SoundMeter();
+
         @Override
         public void run() {
             while (true) {
-                if(mockSound) {
+                if (mockSound) {
                     try {
                         Thread.sleep(5000);
                         continue;
@@ -315,15 +453,18 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             }
         }
     }
+
     private void checkPermission() {
         int storagePermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE);
         int audioPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO);
+        int locationPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION);
+        int phonePermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE);
 
         // If we don't have permissions, ask user for permissions
         if (storagePermission != PackageManager.PERMISSION_GRANTED) {
             String[] PERMISSIONS_STORAGE = {
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
             };
             int REQUEST_EXTERNAL_STORAGE = 1;
 
@@ -344,6 +485,37 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     this,
                     PERMISSIONS_STORAGE,
                     REQUEST_RECORD_AUDIO
+            );
+        }
+
+        if (locationPermission != PackageManager.PERMISSION_GRANTED) {
+            String[] PERMISSIONS_STORAGE = {
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.LOCATION_HARDWARE,
+                    Manifest.permission.ACCESS_LOCATION_EXTRA_COMMANDS
+            };
+            int REQUEST_LOCATION = 1;
+
+            ActivityCompat.requestPermissions(
+                    this,
+                    PERMISSIONS_STORAGE,
+                    REQUEST_LOCATION
+            );
+        }
+
+        if (phonePermission != PackageManager.PERMISSION_GRANTED) {
+            String[] PERMISSIONS_STORAGE = {
+                    Manifest.permission.CALL_PHONE,
+                    Manifest.permission.READ_PHONE_STATE,
+                    Manifest.permission.PROCESS_OUTGOING_CALLS
+            };
+            int REQUEST_PHONE_UPDATES = 1;
+
+            ActivityCompat.requestPermissions(
+                    this,
+                    PERMISSIONS_STORAGE,
+                    REQUEST_PHONE_UPDATES
             );
         }
     }

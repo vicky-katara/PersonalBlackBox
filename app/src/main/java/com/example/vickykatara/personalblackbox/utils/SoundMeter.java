@@ -52,6 +52,10 @@ public class SoundMeter {
                 double someAmp = mRecorder.getMaxAmplitude();
                 if(someAmp > maxAmp)
                     maxAmp = someAmp;
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                }
             }
 
 //            double amp = mRecorder.getMaxAmplitude();
