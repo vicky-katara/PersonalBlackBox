@@ -29,6 +29,7 @@ import android.widget.Toast;
 import com.example.vickykatara.personalblackbox.types.AbsoluteEmergency;
 import com.example.vickykatara.personalblackbox.types.DangerousSituation;
 import com.example.vickykatara.personalblackbox.types.Distraction;
+import com.example.vickykatara.personalblackbox.utils.PhoneStateBroadcastReceiver;
 import com.example.vickykatara.personalblackbox.utils.SoundMeter;
 import com.google.android.gms.appindexing.Action;
 import com.google.android.gms.appindexing.AppIndex;
@@ -58,11 +59,11 @@ public class MainActivity extends AppCompatActivity
     private double lastCapturedPressure, newPressure;
     private int lastCapturedSound;
     private Location lastCapturedLocation;
-    private boolean isOnCall;
+    public boolean isOnCall;
 
     private Set<AbsoluteEmergency> absoluteEmergencyList;
     private Set<DangerousSituation> dangerousSituationsList;
-    private Set<Distraction> distractionsList;
+    public Set<Distraction> distractionsList;
 
     private long recordBeginTimeStamp;
 
@@ -75,9 +76,10 @@ public class MainActivity extends AppCompatActivity
     private Handler soundHandler;
 
     private BroadcastReceiver broadcastReceiver;
-    private PhoneStateListener phoneStateListener;
+//    private PhoneStateListener phoneStateListener;
 
     private TelephonyManager telephonyManager;
+    private IntentFilter callIntentFilter;
     /**
      * ATTENTION: This was auto-generated to implement the App Indexing API.
      * See https://g.co/AppIndexing/AndroidStudio for more information.
@@ -223,7 +225,7 @@ public class MainActivity extends AppCompatActivity
         };
     }
 
-    void checkEmergencySituations() {
+    public void checkEmergencySituations() {
 //        if(DEBUG_MODE_ON) makeAlertDialog("Checking Emergency");
     }
 
@@ -290,47 +292,64 @@ public class MainActivity extends AppCompatActivity
 
     private void createCellBroadcastReceiver() {
 
-        phoneStateListener = new PhoneStateListener() {
-            @Override
-            public void onCallStateChanged(int state, String incomingNumber) {
-                switch (state) {
-                    case TelephonyManager.CALL_STATE_RINGING:
-                        // called when someone is ringing to this phone
-                        makeAlertDialog("Incoming: "+incomingNumber);
-                        break;
-                }
-            }
-        };
+        broadcastReceiver = new PhoneStateBroadcastReceiver(this);
 
-        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
-        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
-
-        broadcastReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                String action = intent.getAction();
-                System.out.println(" >>>>>>>>>>>>>>>>>>>>>>>>>>>>> onReceive: "+action);
-                if (action.equalsIgnoreCase(Intent.ACTION_NEW_OUTGOING_CALL) || action.equalsIgnoreCase(Intent.ACTION_CALL)) {
-                    isOnCall = true;
-                    distractionsList.add(Distraction.ONGOING_CALL);
-                    updateOnCallStrings();
-                    checkEmergencySituations();
-                } else {
-                    isOnCall = false;
-                    checkEmergencySituations();
-                    distractionsList.remove(Distraction.ONGOING_CALL);
-                }
-            }
-        };
-
-        IntentFilter callIntentFilter = new IntentFilter();
+        callIntentFilter = new IntentFilter();
         callIntentFilter.addAction(Intent.ACTION_NEW_OUTGOING_CALL);
         callIntentFilter.addAction(Intent.ACTION_CALL);
+        callIntentFilter.addAction(Intent.EXTRA_PHONE_NUMBER);
 
         registerReceiver(broadcastReceiver, callIntentFilter);
+
+        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+
+        telephonyManager.listen(((PhoneStateBroadcastReceiver)broadcastReceiver).customPhoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
     }
 
-    private void updateOnCallStrings() {
+//    private void createCellBroadcastReceiver2() {
+//
+//        phoneStateListener = new PhoneStateListener() {
+//            @Override
+//            public void onCallStateChanged(int state, String incomingNumber) {
+//                switch (state) {
+//                    case TelephonyManager.CALL_STATE_RINGING:
+//                        // called when someone is ringing to this phone
+//                        makeAlertDialog("Incoming: "+incomingNumber);
+//                        break;
+//                }
+//            }
+//        };
+//
+//        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+//
+//        broadcastReceiver = new BroadcastReceiver() {
+//            @Override
+//            public void onReceive(Context context, Intent intent) {
+//                String action = intent.getAction();
+//                System.out.println(" >>>>>>>>>>>>>>>>>>>>>>>>>>>>> onReceive: "+action);
+//                if (action.equalsIgnoreCase(Intent.ACTION_NEW_OUTGOING_CALL) || action.equalsIgnoreCase(Intent.ACTION_CALL)) {
+//                    isOnCall = true;
+//                    distractionsList.add(Distraction.ONGOING_CALL);
+//                    updateOnCallStrings();
+//                    checkEmergencySituations();
+//                } else {
+//                    isOnCall = false;
+//                    checkEmergencySituations();
+//                    distractionsList.remove(Distraction.ONGOING_CALL);
+//                }
+//            }
+//        };
+//
+//        callIntentFilter = new IntentFilter();
+//        callIntentFilter.addAction(Intent.ACTION_NEW_OUTGOING_CALL);
+//        callIntentFilter.addAction(Intent.ACTION_CALL);
+//
+//        registerReceiver(broadcastReceiver, callIntentFilter);
+//        //        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+//    }
+
+    public void updateOnCallStrings() {
         if (mockCall == false) {
             ((TextView) findViewById(R.id.onGoingCallTextView)).setText((isOnCall ? "On Call !!! " : "Not on a Call"));
         }
@@ -364,11 +383,13 @@ public class MainActivity extends AppCompatActivity
     public void onStart() {
         super.onStart();
 
-        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+        registerReceiver(broadcastReceiver, callIntentFilter);
+
+//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
         soundGenerator = new Thread(new SoundCaptureThread());
         soundGenerator.start();
-        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
-        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+//        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
         client.connect();
@@ -379,8 +400,10 @@ public class MainActivity extends AppCompatActivity
     public void onStop() {
         super.onStop();
 
-        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
+//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
         soundGenerator.interrupt();
+
+//        unregisterReceiver(broadcastReceiver);
 
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
@@ -394,8 +417,9 @@ public class MainActivity extends AppCompatActivity
         mSensorManager.registerListener(this, mPressure, SensorManager.SENSOR_DELAY_NORMAL);
         soundGenerator = new Thread(new SoundCaptureThread());
         soundGenerator.start();
-        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
-        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+//        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+        registerReceiver(broadcastReceiver, callIntentFilter);
     }
 
     @Override
@@ -403,7 +427,8 @@ public class MainActivity extends AppCompatActivity
         // Be sure to unregister the sensor when the activity pauses.
         super.onPause();
         mSensorManager.unregisterListener(this);
-        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
+//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
+        unregisterReceiver(broadcastReceiver);
     }
 
     private class SoundCaptureThread implements Runnable {
