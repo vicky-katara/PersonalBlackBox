@@ -5,7 +5,7 @@
     <string name="barometric_pressure_title">Sudden Fall / Drowning</string>
     <string name="call_title">Ongoing Call?</string>
     <string name="currently_driving_title">Currently Driving?</string>
-    <string name="orientation_title">Phone Orientation Flat?</string>
+    <string name="walking_title">Currently Walking?</string>
     <string name="keyboard_title">Keyboard drawn out?</string>
     <string name="mock_string">Mock</string>
     <string name="yes_mocked">Yes (Mocked)</string>

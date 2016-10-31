@@ -4,7 +4,7 @@ package com.example.vickykatara.personalblackbox.types;
  * Created by Vicky Katara on 28-Oct-16.
  */
 public enum DangerousSituation {
-    DRIVING("driving"), RUNNING("running");
+    DRIVING("driving"), WALKING("walking");
 
     private String label;
 

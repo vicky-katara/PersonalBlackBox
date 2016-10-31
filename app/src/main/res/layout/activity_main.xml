@@ -170,14 +170,14 @@
 
         <!-- Driving Sensor Done -->
 
-        <!-- Orientation Flat Sensor -->
+        <!-- Walking Sensor -->
         <TableRow
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
             <TextView
                 android:textAppearance="?android:attr/textAppearanceMedium"
-                android:text="@string/orientation_title"
+                android:text="@string/walking_title"
                 android:id="@+id/textView15"
                 android:layout_column="0" />
 
@@ -185,7 +185,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/mock_string"
-                android:id="@+id/orientationSwitch"
+                android:id="@+id/walkingSwitch"
                 android:layout_column="2"
                 android:checked="false"
                 android:layout_gravity="center_horizontal" />
@@ -196,11 +196,11 @@
             android:layout_height="match_parent">
             <TextView
                 android:textAppearance="?android:attr/textAppearanceSmall"
-                android:id="@+id/orientationTextView"
+                android:id="@+id/walkingTextView"
                 android:layout_column="0" />
         </TableRow>
 
-        <!-- Orientation Flat Sensor Done -->
+        <!-- Walking Sensor Done -->
 
         <!-- Keyboard Out Sensor -->
         <TableRow

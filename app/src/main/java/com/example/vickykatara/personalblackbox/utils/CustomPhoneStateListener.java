@@ -3,7 +3,6 @@ package com.example.vickykatara.personalblackbox.utils;
 import android.content.Context;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
-import android.widget.Toast;
 
 import com.example.vickykatara.personalblackbox.MainActivity;
 import com.example.vickykatara.personalblackbox.types.Distraction;
@@ -50,7 +49,7 @@ public class CustomPhoneStateListener extends PhoneStateListener {
             return;
         }
         mainActivity.isOnCall = true;
-        mainActivity.distractionsList.add(Distraction.ONGOING_CALL);
+        mainActivity.distractionSet.add(Distraction.ONGOING_CALL);
         mainActivity.updateOnCallStrings();
         mainActivity.checkEmergencySituations();
         mainActivity.makeAlertDialog("On Call");
@@ -63,7 +62,7 @@ public class CustomPhoneStateListener extends PhoneStateListener {
         }
         mainActivity.isOnCall = false;
         mainActivity.checkEmergencySituations();
-        mainActivity.distractionsList.remove(Distraction.ONGOING_CALL);
+        mainActivity.distractionSet.remove(Distraction.ONGOING_CALL);
         mainActivity.makeAlertDialog("Off Call");
     }
 }

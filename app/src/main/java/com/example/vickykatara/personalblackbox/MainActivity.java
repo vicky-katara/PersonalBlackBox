@@ -12,11 +12,13 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.location.Location;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
-import android.support.v4.app.BundleCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.telephony.PhoneStateListener;
@@ -29,41 +31,50 @@ import android.widget.Toast;
 import com.example.vickykatara.personalblackbox.types.AbsoluteEmergency;
 import com.example.vickykatara.personalblackbox.types.DangerousSituation;
 import com.example.vickykatara.personalblackbox.types.Distraction;
+import com.example.vickykatara.personalblackbox.types.Speed;
 import com.example.vickykatara.personalblackbox.utils.PhoneStateBroadcastReceiver;
 import com.example.vickykatara.personalblackbox.utils.SoundMeter;
 import com.google.android.gms.appindexing.Action;
 import com.google.android.gms.appindexing.AppIndex;
 import com.google.android.gms.appindexing.Thing;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.location.LocationListener;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationServices;
 
 import java.util.HashSet;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity
-        implements SensorEventListener {
+        implements SensorEventListener,
+                GoogleApiClient.ConnectionCallbacks,
+                GoogleApiClient.OnConnectionFailedListener,
+                LocationListener {
 
     public static final double PRESSURE_CHANGE_THRESHOLD = 0.0008;
     public static final boolean DEBUG_MODE_ON = true;
     private static final double SOUND_AMPLITUDE_THRESHOLD = 10000; // Range 0:32768
 
-    private boolean pressureNotCapturedYet = false;
-    private boolean soundNotCapturedYet = false;
+    private boolean pressureNotCapturedYet = true;
+    private boolean soundNotCapturedYet = true;
+    private boolean speedNotCapturedYet = true;
 
     private boolean mockPressure = false;
     private boolean mockSound = false;
     private boolean mockCall = false;
     private boolean mockDriving = false;
-    private boolean mockOrientation = false;
+    private boolean mockWalking = false;
     private boolean mockKeyboardDrawn = false;
 
     private double lastCapturedPressure, newPressure;
     private int lastCapturedSound;
-    private Location lastCapturedLocation;
+    private Location firstLocation;
+    private Speed lastCapturedSpeed;
     public boolean isOnCall;
 
-    private Set<AbsoluteEmergency> absoluteEmergencyList;
-    private Set<DangerousSituation> dangerousSituationsList;
-    public Set<Distraction> distractionsList;
+    private Set<AbsoluteEmergency> absoluteEmergencySet;
+    private Set<DangerousSituation> dangerousSituationsSet;
+    public Set<Distraction> distractionSet;
 
     private long recordBeginTimeStamp;
 
@@ -86,14 +97,16 @@ public class MainActivity extends AppCompatActivity
      */
     private GoogleApiClient client;
 
+    private LocationRequest locationRequest;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        this.absoluteEmergencyList = new HashSet<>();
-        this.dangerousSituationsList = new HashSet<>();
-        this.distractionsList = new HashSet<>();
+        this.absoluteEmergencySet = new HashSet<>();
+        this.dangerousSituationsSet = new HashSet<>();
+        this.distractionSet = new HashSet<>();
 
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         mPressure = mSensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
@@ -110,9 +123,11 @@ public class MainActivity extends AppCompatActivity
                         if (isChecked) {
                             mockPressure = true;
                             ((TextView) findViewById(R.id.pressureTextView)).setText(R.string.yes_mocked);
+                            absoluteEmergencySet.add(AbsoluteEmergency.PRESSURE_CHANGE);
                             checkEmergencySituations();
                         } else {
                             mockPressure = false;
+                            absoluteEmergencySet.remove(AbsoluteEmergency.PRESSURE_CHANGE);
                             updatePressureStrings(true);
                         }
                     }
@@ -126,9 +141,11 @@ public class MainActivity extends AppCompatActivity
                         if (isChecked) {
                             mockSound = true;
                             ((TextView) findViewById(R.id.soundTextView)).setText(R.string.yes_mocked);
+                            absoluteEmergencySet.add(AbsoluteEmergency.LARGE_NOISE);
                             checkEmergencySituations();
                         } else {
                             mockSound = false;
+                            absoluteEmergencySet.remove(AbsoluteEmergency.LARGE_NOISE);
                             updateSoundStrings(true);
                         }
                     }
@@ -142,9 +159,11 @@ public class MainActivity extends AppCompatActivity
                         if (isChecked) {
                             mockCall = true;
                             ((TextView) findViewById(R.id.onGoingCallTextView)).setText(R.string.yes_mocked);
+                            distractionSet.add(Distraction.ONGOING_CALL);
                             checkEmergencySituations();
                         } else {
                             mockCall = false;
+                            distractionSet.remove(Distraction.ONGOING_CALL);
                             updateOnCallStrings();
                         }
                     }
@@ -156,26 +175,24 @@ public class MainActivity extends AppCompatActivity
                     @Override
                     public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                         if (isChecked) {
-                            mockDriving = true;
-                            ((TextView) findViewById(R.id.drivingTextView)).setText(R.string.yes_mocked);
-                            checkEmergencySituations();
+                            mockDriving();
+                            unmockWalking();
                         } else {
-                            mockDriving = false;
+                            unmockDriving();
                         }
                     }
                 }
         );
 
-        ((Switch) findViewById(R.id.orientationSwitch)).setOnCheckedChangeListener(
+        ((Switch) findViewById(R.id.walkingSwitch)).setOnCheckedChangeListener(
                 new CompoundButton.OnCheckedChangeListener() {
                     @Override
                     public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                         if (isChecked) {
-                            mockOrientation = true;
-                            ((TextView) findViewById(R.id.orientationTextView)).setText(R.string.yes_mocked);
-                            checkEmergencySituations();
+                            mockWalking();
+                            unmockDriving();
                         } else {
-                            mockOrientation = false;
+                            unmockWalking();
                         }
                     }
                 }
@@ -187,10 +204,12 @@ public class MainActivity extends AppCompatActivity
                     public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                         if (isChecked) {
                             mockKeyboardDrawn = true;
-                            ((TextView) findViewById(R.id.orientationTextView)).setText(R.string.yes_mocked);
+                            ((TextView) findViewById(R.id.keyboardTextView)).setText(R.string.yes_mocked);
+                            distractionSet.add(Distraction.TEXTING);
                             checkEmergencySituations();
                         } else {
                             mockKeyboardDrawn = false;
+                            distractionSet.remove(Distraction.TEXTING);
                         }
                     }
                 }
@@ -203,15 +222,151 @@ public class MainActivity extends AppCompatActivity
 
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
-        client = new GoogleApiClient.Builder(this).addApi(AppIndex.API).build();
+//        client = new GoogleApiClient.Builder(this).addApi(AppIndex.API).build();
+
+        client = new GoogleApiClient.Builder(this)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .addApi(LocationServices.API)
+                .addApi(AppIndex.API)
+                .build();
+
+        createLocationListener();
 
         printAllStrings();
     }
+
+    private void createLocationListener() {
+        if (client == null) {
+            client = new GoogleApiClient.Builder(this)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .addApi(LocationServices.API)
+                    .build();
+        }
+
+        locationRequest = LocationRequest.create();
+        locationRequest.setInterval(10*1000);
+        locationRequest.setFastestInterval(5*1000);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+
+        final LocationListener listener = this;
+
+
+        new AsyncTask<Void, Void, Void>(){
+
+            boolean isListening = false;
+
+            @Override
+            protected Void doInBackground(Void... params) {
+
+                System.out.println(" &&&&&&&&&&&&&& do In Background &&&&&&&&&&&&&&&&&&&&& ");
+
+                Looper.prepare();
+
+                if ( DEBUG_MODE_ON ) makeAlertDialog(" -- Do in Background -- ");
+
+                if (client != null && !client.isConnected() ) {
+                    client.connect();
+                }
+                while(client.isConnecting());//wait
+
+                makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
+
+                if (ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    checkPermission();
+                    makeAlertDialog("Permission Issues");
+                }
+                if (client.isConnected()) {
+                    LocationServices
+                            .FusedLocationApi
+                            .requestLocationUpdates
+                                    (client, locationRequest, listener);
+                    makeAlertDialog("Listening to Location now.");
+                    isListening = true;
+                } else {
+                    System.err.println(" Not Connected ");
+                    makeAlertDialog("Not Connected");
+                }
+                return null;
+            }
+        @Override
+        protected void onPostExecute(Void result) {
+            super.onPostExecute(result);
+            makeAlertDialog("Listening to Location Now");
+        }
+        }.execute();
+
+//        new Thread(new Runnable() {
+//            public void run() {
+//                new Handler(Looper.getMainLooper()).post(
+//                        new Runnable() {
+//                            @Override
+//                            public void run() {
+//                                if (client != null && !client.isConnected() ) {
+//                                    client.connect();
+//                                }
+//                                while(client.isConnecting());//wait
+//
+//                                makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
+//
+//                                if (ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+//                                    checkPermission();
+//                                    makeAlertDialog("Permission Issues");
+//                                }
+//                                if (client.isConnected()) {
+//                                    LocationServices
+//                                            .FusedLocationApi
+//                                            .requestLocationUpdates
+//                                                    (client, locationRequest, listener);
+//                                    makeAlertDialog("Listening to Location now.");
+//                                } else {
+//                                    System.err.println(" Not Connected ");
+//                                    makeAlertDialog("Not Connected");
+//                                }
+//                            }
+//                        }
+//                );
+//            }
+//        }).start();
+
+    }
+
+    private void mockWalking() {
+        mockWalking = true;
+        ((TextView) findViewById(R.id.walkingTextView)).setText(R.string.yes_mocked);
+        dangerousSituationsSet.add(DangerousSituation.WALKING);
+        checkEmergencySituations();
+    }
+
+    private void mockDriving() {
+        mockDriving = true;
+        ((TextView) findViewById(R.id.drivingTextView)).setText(R.string.yes_mocked);
+        dangerousSituationsSet.add(DangerousSituation.DRIVING);
+        checkEmergencySituations();
+    }
+
+    private void unmockWalking() {
+        mockDriving = false;
+        dangerousSituationsSet.remove(DangerousSituation.WALKING);
+        ((Switch) findViewById(R.id.walkingSwitch)).setChecked(false);
+        updateDrivingWalkingStrings();
+    }
+
+    private void unmockDriving() {
+        mockDriving = false;
+        dangerousSituationsSet.remove(DangerousSituation.DRIVING);
+        ((Switch) findViewById(R.id.drivingSwitch)).setChecked(false);
+        updateDrivingWalkingStrings();
+    }
+
+
 
     private void printAllStrings() {
         this.updatePressureStrings(false);
         this.updateSoundStrings(false);
         this.updateOnCallStrings();
+        this.updateDrivingWalkingStrings();
     }
 
     private void createSoundHandler() {
@@ -244,17 +399,17 @@ public class MainActivity extends AppCompatActivity
 
     private void checkPressureChange(float newPressureValue) {
         newPressure = newPressureValue;
-        if (percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD && pressureNotCapturedYet) {
+        if (percentChange(lastCapturedPressure, newPressureValue) > PRESSURE_CHANGE_THRESHOLD && pressureNotCapturedYet == false ) {
             if (DEBUG_MODE_ON) makeAlertDialog("Sudden Pressure Change Detected");
-            absoluteEmergencyList.add(AbsoluteEmergency.PRESSURE_CHANGE);
+            absoluteEmergencySet.add(AbsoluteEmergency.PRESSURE_CHANGE);
             checkEmergencySituations();
             updatePressureStrings(true);
         } else {
-            absoluteEmergencyList.remove(AbsoluteEmergency.PRESSURE_CHANGE);
-            pressureNotCapturedYet = true;
+            absoluteEmergencySet.remove(AbsoluteEmergency.PRESSURE_CHANGE);
+            pressureNotCapturedYet = false;
             updatePressureStrings(false);
         }
-        lastCapturedPressure = newPressureValue;
+        lastCapturedPressure = newPressure;
     }
 
     private double percentChange(double lastCapturedPressure, double newPressureValue) {
@@ -272,13 +427,13 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void checkSoundEmergency(double amplitude) {
-        if (amplitude > SOUND_AMPLITUDE_THRESHOLD && soundNotCapturedYet) {
-            absoluteEmergencyList.add(AbsoluteEmergency.LARGE_NOISE);
+        if (amplitude > SOUND_AMPLITUDE_THRESHOLD && soundNotCapturedYet == false ) {
+            absoluteEmergencySet.add(AbsoluteEmergency.LARGE_NOISE);
             updateSoundStrings(true);
             checkEmergencySituations();
         } else {
-            absoluteEmergencyList.remove(AbsoluteEmergency.LARGE_NOISE);
-            soundNotCapturedYet = true;
+            absoluteEmergencySet.remove(AbsoluteEmergency.LARGE_NOISE);
+            soundNotCapturedYet = false;
             updateSoundStrings(false);
         }
         lastCapturedSound = (int)Math.ceil(amplitude);
@@ -330,13 +485,13 @@ public class MainActivity extends AppCompatActivity
 //                System.out.println(" >>>>>>>>>>>>>>>>>>>>>>>>>>>>> onReceive: "+action);
 //                if (action.equalsIgnoreCase(Intent.ACTION_NEW_OUTGOING_CALL) || action.equalsIgnoreCase(Intent.ACTION_CALL)) {
 //                    isOnCall = true;
-//                    distractionsList.add(Distraction.ONGOING_CALL);
+//                    distractionSet.add(Distraction.ONGOING_CALL);
 //                    updateOnCallStrings();
 //                    checkEmergencySituations();
 //                } else {
 //                    isOnCall = false;
 //                    checkEmergencySituations();
-//                    distractionsList.remove(Distraction.ONGOING_CALL);
+//                    distractionSet.remove(Distraction.ONGOING_CALL);
 //                }
 //            }
 //        };
@@ -429,6 +584,67 @@ public class MainActivity extends AppCompatActivity
         mSensorManager.unregisterListener(this);
 //        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
         unregisterReceiver(broadcastReceiver);
+    }
+
+    @Override
+    public void onLocationChanged(Location location) {
+        if (DEBUG_MODE_ON) makeAlertDialog(location.getLatitude()+":"+location.getLongitude()+"@"+location.getTime());
+        if(speedNotCapturedYet && firstLocation == null) {
+            firstLocation = location;
+        } else if(speedNotCapturedYet && firstLocation != null ){
+            lastCapturedSpeed = new Speed(firstLocation, location);
+            speedNotCapturedYet = false;
+            checkSpeedEmergency();
+        } else {
+            lastCapturedSpeed = Speed.fromOld(location, lastCapturedSpeed);
+            checkSpeedEmergency();
+        }
+    }
+
+    private void checkSpeedEmergency() {
+        double currentSpeed = lastCapturedSpeed.getSpeed();
+        if( currentSpeed >= Speed.MINIMUM_DRIVING_SPEED ) {
+            dangerousSituationsSet.add(DangerousSituation.DRIVING);
+            dangerousSituationsSet.remove(DangerousSituation.WALKING);
+            updateDrivingWalkingStrings();
+            checkEmergencySituations();
+        } else if( currentSpeed >= Speed.MINIMUM_WALKING_SPEED ) {
+            dangerousSituationsSet.add(DangerousSituation.WALKING);
+            dangerousSituationsSet.remove(DangerousSituation.DRIVING);
+            updateDrivingWalkingStrings();
+            checkEmergencySituations();
+        } else {
+            dangerousSituationsSet.remove(DangerousSituation.DRIVING);
+            dangerousSituationsSet.remove(DangerousSituation.WALKING);
+            updateDrivingWalkingStrings();
+            checkEmergencySituations();
+        }
+    }
+
+    private void updateDrivingWalkingStrings() {
+        double speed;
+        if(lastCapturedSpeed != null )
+            speed = lastCapturedSpeed.getSpeed();
+        else
+            speed = Double.NaN;
+        String speedStr = String.format("%.5f", speed);
+        if (mockDriving == false) {
+            ((TextView) findViewById(R.id.drivingTextView)).setText(speedStr+" m/s"+(speed >= Speed.MINIMUM_DRIVING_SPEED ? " !!! ":""));
+        }
+        if (mockWalking == false) {
+            ((TextView) findViewById(R.id.walkingTextView)).setText(speedStr+" m/s"+(speed >= Speed.MINIMUM_WALKING_SPEED ? " !!! ":""));
+        }
+    }
+
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {}
+
+    @Override
+    public void onConnectionSuspended(int i) {}
+
+    @Override
+    public void onConnectionFailed(@NonNull com.google.android.gms.common.ConnectionResult connectionResult) {
+
     }
 
     private class SoundCaptureThread implements Runnable {
