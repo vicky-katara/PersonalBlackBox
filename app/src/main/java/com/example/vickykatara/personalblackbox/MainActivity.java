@@ -98,6 +98,7 @@ public class MainActivity extends AppCompatActivity
     private GoogleApiClient client;
 
     private LocationRequest locationRequest;
+    private Handler locationHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -236,102 +237,6 @@ public class MainActivity extends AppCompatActivity
         printAllStrings();
     }
 
-    private void createLocationListener() {
-        if (client == null) {
-            client = new GoogleApiClient.Builder(this)
-                    .addConnectionCallbacks(this)
-                    .addOnConnectionFailedListener(this)
-                    .addApi(LocationServices.API)
-                    .build();
-        }
-
-        locationRequest = LocationRequest.create();
-        locationRequest.setInterval(10*1000);
-        locationRequest.setFastestInterval(5*1000);
-        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-
-        final LocationListener listener = this;
-
-
-        new AsyncTask<Void, Void, Void>(){
-
-            boolean isListening = false;
-
-            @Override
-            protected Void doInBackground(Void... params) {
-
-                System.out.println(" &&&&&&&&&&&&&& do In Background &&&&&&&&&&&&&&&&&&&&& ");
-
-                Looper.prepare();
-
-                if ( DEBUG_MODE_ON ) makeAlertDialog(" -- Do in Background -- ");
-
-                if (client != null && !client.isConnected() ) {
-                    client.connect();
-                }
-                while(client.isConnecting());//wait
-
-                makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
-
-                if (ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                    checkPermission();
-                    makeAlertDialog("Permission Issues");
-                }
-                if (client.isConnected()) {
-                    LocationServices
-                            .FusedLocationApi
-                            .requestLocationUpdates
-                                    (client, locationRequest, listener);
-                    makeAlertDialog("Listening to Location now.");
-                    isListening = true;
-                } else {
-                    System.err.println(" Not Connected ");
-                    makeAlertDialog("Not Connected");
-                }
-                return null;
-            }
-        @Override
-        protected void onPostExecute(Void result) {
-            super.onPostExecute(result);
-            makeAlertDialog("Listening to Location Now");
-        }
-        }.execute();
-
-//        new Thread(new Runnable() {
-//            public void run() {
-//                new Handler(Looper.getMainLooper()).post(
-//                        new Runnable() {
-//                            @Override
-//                            public void run() {
-//                                if (client != null && !client.isConnected() ) {
-//                                    client.connect();
-//                                }
-//                                while(client.isConnecting());//wait
-//
-//                                makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
-//
-//                                if (ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-//                                    checkPermission();
-//                                    makeAlertDialog("Permission Issues");
-//                                }
-//                                if (client.isConnected()) {
-//                                    LocationServices
-//                                            .FusedLocationApi
-//                                            .requestLocationUpdates
-//                                                    (client, locationRequest, listener);
-//                                    makeAlertDialog("Listening to Location now.");
-//                                } else {
-//                                    System.err.println(" Not Connected ");
-//                                    makeAlertDialog("Not Connected");
-//                                }
-//                            }
-//                        }
-//                );
-//            }
-//        }).start();
-
-    }
-
     private void mockWalking() {
         mockWalking = true;
         ((TextView) findViewById(R.id.walkingTextView)).setText(R.string.yes_mocked);
@@ -347,7 +252,7 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void unmockWalking() {
-        mockDriving = false;
+        mockWalking = false;
         dangerousSituationsSet.remove(DangerousSituation.WALKING);
         ((Switch) findViewById(R.id.walkingSwitch)).setChecked(false);
         updateDrivingWalkingStrings();
@@ -359,8 +264,6 @@ public class MainActivity extends AppCompatActivity
         ((Switch) findViewById(R.id.drivingSwitch)).setChecked(false);
         updateDrivingWalkingStrings();
     }
-
-
 
     private void printAllStrings() {
         this.updatePressureStrings(false);
@@ -586,19 +489,108 @@ public class MainActivity extends AppCompatActivity
         unregisterReceiver(broadcastReceiver);
     }
 
+    private void createLocationListener() {
+        createLocationHandler();
+        if (client == null) {
+            client = new GoogleApiClient.Builder(this)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .addApi(LocationServices.API)
+                    .build();
+        }
+
+        locationRequest = LocationRequest.create();
+        locationRequest.setInterval(10*1000);
+        locationRequest.setFastestInterval(5*1000);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+
+        final LocationListener listener = this;
+
+
+        new AsyncTask<Void, Void, Void>(){
+
+            boolean isListening = false;
+            Location mLastLocation;
+
+            @Override
+            protected Void doInBackground(Void... params) {
+
+                System.out.println(" &&&&&&&&&&&&&& do In Background &&&&&&&&&&&&&&&&&&&&& ");
+
+                Looper.prepare();
+
+                if ( DEBUG_MODE_ON ) makeAlertDialog(" -- Do in Background -- ");
+
+                if (client != null && !client.isConnected() ) {
+                    client.connect();
+                }
+                while(client.isConnecting());//wait
+
+                makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
+
+                if (ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    checkPermission();
+                    makeAlertDialog("Permission Issues");
+                }
+                if (client.isConnected()) {
+                    LocationServices
+                            .FusedLocationApi
+                            .requestLocationUpdates
+                                    (client, locationRequest, listener);
+                    makeAlertDialog("Listening to Location now.");
+                    mLastLocation = LocationServices.FusedLocationApi.getLastLocation(
+                            client);
+                    isListening = true;
+                } else {
+                    System.err.println(" Not Connected ");
+                    makeAlertDialog("Not Connected");
+                }
+
+                Looper.loop();
+                return null;
+
+            }
+            @Override
+            protected void onPostExecute(Void result) {
+                super.onPostExecute(result);
+                if(DEBUG_MODE_ON)
+                    makeAlertDialog("Listening to Location Now : " + mLastLocation.getLatitude()+":"+mLastLocation.getLongitude()+"@"+mLastLocation.getTime());
+            }
+        }.execute();
+    }
+
     @Override
     public void onLocationChanged(Location location) {
-        if (DEBUG_MODE_ON) makeAlertDialog(location.getLatitude()+":"+location.getLongitude()+"@"+location.getTime());
-        if(speedNotCapturedYet && firstLocation == null) {
-            firstLocation = location;
-        } else if(speedNotCapturedYet && firstLocation != null ){
-            lastCapturedSpeed = new Speed(firstLocation, location);
-            speedNotCapturedYet = false;
-            checkSpeedEmergency();
-        } else {
-            lastCapturedSpeed = Speed.fromOld(location, lastCapturedSpeed);
-            checkSpeedEmergency();
-        }
+        Bundle bundle = new Bundle();
+        bundle.putParcelable("newLocation", location);
+
+        Message message = new Message();
+        message.setData(bundle);
+
+        locationHandler.sendMessage(message);
+    }
+
+    private void createLocationHandler() {
+        checkPermission();
+        locationHandler = new Handler() {
+            public void handleMessage(Message msg) {
+                Location newLocation = (Location) msg.getData().getParcelable("newLocation");
+                if (DEBUG_MODE_ON) makeAlertDialog(newLocation.getLatitude()+":"+newLocation.getLongitude()+"@"+newLocation.getTime());
+                if(speedNotCapturedYet && firstLocation == null) {
+                    firstLocation = newLocation;
+                    if (DEBUG_MODE_ON) makeAlertDialog("First Lcoation Captured");
+                } else if(speedNotCapturedYet && firstLocation != null ){
+                    lastCapturedSpeed = new Speed(firstLocation, newLocation);
+                    speedNotCapturedYet = false;
+                    if (DEBUG_MODE_ON) makeAlertDialog("First Speed Captured: "+lastCapturedSpeed.getSpeed());
+                    checkSpeedEmergency();
+                } else {
+                    lastCapturedSpeed = Speed.fromOld(lastCapturedSpeed, newLocation);
+                    if (DEBUG_MODE_ON) makeAlertDialog("Speed Updated: "+lastCapturedSpeed.getSpeed());
+                    checkSpeedEmergency();
+                }
+            }
+        };
     }
 
     private void checkSpeedEmergency() {
@@ -623,10 +615,12 @@ public class MainActivity extends AppCompatActivity
 
     private void updateDrivingWalkingStrings() {
         double speed;
-        if(lastCapturedSpeed != null )
+        if(lastCapturedSpeed != null ) {
             speed = lastCapturedSpeed.getSpeed();
-        else
+            if(DEBUG_MODE_ON) makeAlertDialog("distance :"+lastCapturedSpeed.getDistance()+" speed:"+speed);
+        } else {
             speed = Double.NaN;
+        }
         String speedStr = String.format("%.5f", speed);
         if (mockDriving == false) {
             ((TextView) findViewById(R.id.drivingTextView)).setText(speedStr+" m/s"+(speed >= Speed.MINIMUM_DRIVING_SPEED ? " !!! ":""));
