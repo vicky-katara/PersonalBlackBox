@@ -31,4 +31,5 @@ dependencies {
     compile 'com.google.android.gms:play-services:9.4.0'
     compile 'com.google.android.gms:play-services-appindexing:9.4.0'
     compile 'com.google.android.gms:play-services-location:9.4.0'
+    compile 'com.github.yshrsmz:KeyboardVisibilityEvent:v2.0.0'
 }

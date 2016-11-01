@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PersonalBlackBox</string>
+    <string name="app_name">Personal Black Box</string>
     <string name="contexts_title">Contexts</string>
     <string name="sound_title">Intense Ambient Sound?</string>
     <string name="barometric_pressure_title">Sudden Fall / Drowning</string>
@@ -9,4 +9,8 @@
     <string name="keyboard_title">Keyboard drawn out?</string>
     <string name="mock_string">Mock</string>
     <string name="yes_mocked">Yes (Mocked)</string>
+    <string name="just_type">Just Type</string>
+    <string name="absolute_emergencies">Absolute Emergencies</string>
+    <string name="dangerous_situations">Cautious Situations</string>
+    <string name="distractions">Distractions</string>
 </resources>

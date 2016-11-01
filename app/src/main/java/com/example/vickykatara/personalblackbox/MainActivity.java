@@ -42,6 +42,9 @@ import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
 
+import net.yslibrary.android.keyboardvisibilityevent.KeyboardVisibilityEvent;
+import net.yslibrary.android.keyboardvisibilityevent.KeyboardVisibilityEventListener;
+
 import java.util.HashSet;
 import java.util.Set;
 
@@ -52,7 +55,7 @@ public class MainActivity extends AppCompatActivity
                 LocationListener {
 
     public static final double PRESSURE_CHANGE_THRESHOLD = 0.0008;
-    public static final boolean DEBUG_MODE_ON = true;
+    public static final boolean DEBUG_MODE_ON = false;
     private static final double SOUND_AMPLITUDE_THRESHOLD = 10000; // Range 0:32768
 
     private boolean pressureNotCapturedYet = true;
@@ -66,20 +69,19 @@ public class MainActivity extends AppCompatActivity
     private boolean mockWalking = false;
     private boolean mockKeyboardDrawn = false;
 
-    private double lastCapturedPressure, newPressure;
-    private int lastCapturedSound;
-    private Location firstLocation;
-    private Speed lastCapturedSpeed;
-    public boolean isOnCall;
+    double lastCapturedPressure, newPressure;
+    int lastCapturedSound;
+    private Location firstLocation, lastCapturedLocation;
+    Speed lastCapturedSpeed;
+    boolean isOnCall;
+    boolean isKeyboardDrawn;
 
     private Set<AbsoluteEmergency> absoluteEmergencySet;
     private Set<DangerousSituation> dangerousSituationsSet;
     public Set<Distraction> distractionSet;
 
-    private long recordBeginTimeStamp;
-
     private SensorManager mSensorManager;
-    private Sensor mPressure;
+    private Sensor mPressure, mLight, mProximity;
 
     private boolean noPressureSensor = false;
 
@@ -99,6 +101,8 @@ public class MainActivity extends AppCompatActivity
 
     private LocationRequest locationRequest;
     private Handler locationHandler;
+    float lastCapturedLightIntensity;
+    float lastCapturedProximityValue;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -111,6 +115,9 @@ public class MainActivity extends AppCompatActivity
 
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         mPressure = mSensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
+        mLight = mSensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+        mProximity = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+
         if (mPressure == null)
             noPressureSensor = true;
 
@@ -212,6 +219,7 @@ public class MainActivity extends AppCompatActivity
                             mockKeyboardDrawn = false;
                             distractionSet.remove(Distraction.TEXTING);
                         }
+                        updateKeyboardStrings();
                     }
                 }
         );
@@ -234,7 +242,39 @@ public class MainActivity extends AppCompatActivity
 
         createLocationListener();
 
+        createKeyboardListener();
+
         printAllStrings();
+    }
+
+    private void createKeyboardListener() {
+        KeyboardVisibilityEvent.setEventListener(
+                this,
+                new KeyboardVisibilityEventListener() {
+                    @Override
+                    public void onVisibilityChanged(boolean isOpen) {
+                        isKeyboardDrawn = isOpen;
+                        if (DEBUG_MODE_ON) makeAlertDialog("The keyboard has been "+(isOpen ? "":"un")+"drawn");
+                        checkKeyboardChange();
+                    }
+                });
+    }
+
+    private void checkKeyboardChange() {
+        if (isKeyboardDrawn) {
+            distractionSet.add(Distraction.TEXTING);
+            checkEmergencySituations();
+        } else {
+            distractionSet.remove(Distraction.TEXTING);
+            checkEmergencySituations();
+        }
+        updateKeyboardStrings();
+    }
+
+    private void updateKeyboardStrings() {
+        if (mockKeyboardDrawn == false) {
+            ((TextView) findViewById(R.id.keyboardTextView)).setText(isKeyboardDrawn ? "Yes" : "No");
+        }
     }
 
     private void mockWalking() {
@@ -270,6 +310,7 @@ public class MainActivity extends AppCompatActivity
         this.updateSoundStrings(false);
         this.updateOnCallStrings();
         this.updateDrivingWalkingStrings();
+        this.updateKeyboardStrings();
     }
 
     private void createSoundHandler() {
@@ -284,8 +325,20 @@ public class MainActivity extends AppCompatActivity
     }
 
     public void checkEmergencySituations() {
-//        if(DEBUG_MODE_ON) makeAlertDialog("Checking Emergency");
+        if(DEBUG_MODE_ON) makeAlertDialog(getSetReps());
+        if( (absoluteEmergencySet.isEmpty() == false )||
+                (dangerousSituationsSet.isEmpty() == false && distractionSet.isEmpty() == false ))
+            captureBlackboxData();
     }
+
+    private void captureBlackboxData() {
+
+    }
+
+    private String getSetReps() {
+        return this.absoluteEmergencySet+"\n"+this.dangerousSituationsSet+"\n"+this.distractionSet;
+    }
+
 
     @Override
     public void onSensorChanged(SensorEvent event) {
@@ -293,6 +346,10 @@ public class MainActivity extends AppCompatActivity
         if (sensor.getType() == Sensor.TYPE_PRESSURE && mockPressure == false) {
 //            System.out.println(")))))))))))))))))))))))))) MockPressure:"+mockPressure);
             checkPressureChange(event.values[0]);
+        } else if(sensor.getType() == Sensor.TYPE_LIGHT) {
+            this.lastCapturedLightIntensity = event.values[0];
+        } else if(sensor.getType() == Sensor.TYPE_PROXIMITY) {
+            this.lastCapturedProximityValue = event.values[0];
         }
     }
 
@@ -418,7 +475,7 @@ public class MainActivity extends AppCompatActivity
             System.err.println("******             dialog" + message);
         else
             System.out.println("******             dialog" + message);
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     /**
@@ -473,6 +530,8 @@ public class MainActivity extends AppCompatActivity
     protected void onResume() {
         super.onResume();
         mSensorManager.registerListener(this, mPressure, SensorManager.SENSOR_DELAY_NORMAL);
+        mSensorManager.registerListener(this, mLight, SensorManager.SENSOR_DELAY_NORMAL);
+        mSensorManager.registerListener(this, mProximity, SensorManager.SENSOR_DELAY_NORMAL);
         soundGenerator = new Thread(new SoundCaptureThread());
         soundGenerator.start();
 //        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
@@ -526,7 +585,7 @@ public class MainActivity extends AppCompatActivity
                 }
                 while(client.isConnecting());//wait
 
-                makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
+                if ( DEBUG_MODE_ON ) makeAlertDialog("client.isConnecting():"+client.isConnecting()+"client.isConnected():"+client.isConnected());
 
                 if (ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     checkPermission();
@@ -537,13 +596,13 @@ public class MainActivity extends AppCompatActivity
                             .FusedLocationApi
                             .requestLocationUpdates
                                     (client, locationRequest, listener);
-                    makeAlertDialog("Listening to Location now.");
+                    if ( DEBUG_MODE_ON ) makeAlertDialog("Listening to Location now.");
                     mLastLocation = LocationServices.FusedLocationApi.getLastLocation(
                             client);
                     isListening = true;
                 } else {
                     System.err.println(" Not Connected ");
-                    makeAlertDialog("Not Connected");
+                    if ( DEBUG_MODE_ON ) makeAlertDialog("Not Connected");
                 }
 
                 Looper.loop();
@@ -561,6 +620,7 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void onLocationChanged(Location location) {
+        this.lastCapturedLocation = location;
         Bundle bundle = new Bundle();
         bundle.putParcelable("newLocation", location);
 
@@ -575,18 +635,20 @@ public class MainActivity extends AppCompatActivity
         locationHandler = new Handler() {
             public void handleMessage(Message msg) {
                 Location newLocation = (Location) msg.getData().getParcelable("newLocation");
-                if (DEBUG_MODE_ON) makeAlertDialog(newLocation.getLatitude()+":"+newLocation.getLongitude()+"@"+newLocation.getTime());
+                if (DEBUG_MODE_ON)
+                    makeAlertDialog(newLocation.getLatitude()+":"+newLocation.getLongitude()+"@"+newLocation.getTime());
                 if(speedNotCapturedYet && firstLocation == null) {
                     firstLocation = newLocation;
                     if (DEBUG_MODE_ON) makeAlertDialog("First Lcoation Captured");
-                } else if(speedNotCapturedYet && firstLocation != null ){
+                } else if(speedNotCapturedYet ){
                     lastCapturedSpeed = new Speed(firstLocation, newLocation);
                     speedNotCapturedYet = false;
                     if (DEBUG_MODE_ON) makeAlertDialog("First Speed Captured: "+lastCapturedSpeed.getSpeed());
                     checkSpeedEmergency();
                 } else {
                     lastCapturedSpeed = Speed.fromOld(lastCapturedSpeed, newLocation);
-                    if (DEBUG_MODE_ON) makeAlertDialog("Speed Updated: "+lastCapturedSpeed.getSpeed());
+                    if (DEBUG_MODE_ON)
+                        makeAlertDialog("Speed Updated: "+lastCapturedSpeed.getSpeed());
                     checkSpeedEmergency();
                 }
             }
@@ -614,14 +676,16 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void updateDrivingWalkingStrings() {
-        double speed;
+        double speed = -999;
+        String speedStr;
         if(lastCapturedSpeed != null ) {
             speed = lastCapturedSpeed.getSpeed();
+            speedStr = String.format("%.5f", speed);
             if(DEBUG_MODE_ON) makeAlertDialog("distance :"+lastCapturedSpeed.getDistance()+" speed:"+speed);
         } else {
-            speed = Double.NaN;
+            speedStr = "--";
         }
-        String speedStr = String.format("%.5f", speed);
+
         if (mockDriving == false) {
             ((TextView) findViewById(R.id.drivingTextView)).setText(speedStr+" m/s"+(speed >= Speed.MINIMUM_DRIVING_SPEED ? " !!! ":""));
         }

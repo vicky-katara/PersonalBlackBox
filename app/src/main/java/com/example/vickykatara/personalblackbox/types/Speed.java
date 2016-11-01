@@ -1,6 +1,8 @@
 package com.example.vickykatara.personalblackbox.types;
 
 import android.location.Location;
+import android.os.Build;
+import android.support.annotation.RequiresApi;
 
 /**
  * Created by Vicky Katara on 31-Oct-16.
@@ -23,7 +25,11 @@ public class Speed {
     }
 
     public double getSpeed() {
-        return dest.distanceTo(src)/((dest.getTime()-src.getTime())*1.0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            return dest.distanceTo(src)/((dest.getElapsedRealtimeNanos() - src.getElapsedRealtimeNanos())*1000000.0);
+        } else {
+            return dest.distanceTo(src)/((dest.getTime()-src.getTime())*1000.0);
+        }
     }
 
     public double getDistance() {

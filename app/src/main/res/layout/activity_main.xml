@@ -9,20 +9,19 @@
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context="com.example.vickykatara.personalblackbox.MainActivity">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textAppearance="?android:attr/textAppearanceLarge"
-        android:text="@string/contexts_title"
-        android:id="@+id/testingTitle"
-        android:layout_alignParentTop="true"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentStart="true" />
+    <!--<TextView-->
+        <!--android:layout_width="wrap_content"-->
+        <!--android:layout_height="wrap_content"-->
+        <!--android:textAppearance="?android:attr/textAppearanceLarge"-->
+        <!--android:text="@string/contexts_title"-->
+        <!--android:id="@+id/testingTitle"-->
+        <!--android:layout_alignParentTop="true"-->
+        <!--android:layout_alignParentLeft="true"-->
+        <!--android:layout_alignParentStart="true" />-->
 
     <TableLayout
         android:layout_width="fill_parent"
         android:layout_height="match_parent"
-        android:layout_below="@+id/testingTitle"
         android:layout_alignParentLeft="true"
         android:layout_alignParentStart="true"
         android:dividerPadding="5px"
@@ -32,6 +31,17 @@
         android:layout_centerHorizontal="true"
         android:paddingLeft="10px"
         android:layout_alignParentRight="false">
+
+        <TableRow
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginBottom="1dp">
+            <TextView
+                android:textAppearance="?android:attr/textAppearanceLarge"
+                android:id="@+id/someTextView1"
+                android:text="@string/absolute_emergencies"
+                android:layout_column="0" />
+        </TableRow>
 
         <!-- Pressure Sensor -->
 
@@ -68,7 +78,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:id="@+id/textView9"
-                android:text="            "
+                android:text="     "
                 android:layout_column="1" />
         </TableRow>
 
@@ -106,37 +116,16 @@
 
         <!-- Sound Sensor Done -->
 
-        <!-- Ongoing Call Sensor -->
-        <TableRow
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-            <TextView
-                android:textAppearance="?android:attr/textAppearanceMedium"
-                android:text="@string/call_title"
-                android:id="@+id/textView13"
-                android:layout_column="0" />
-
-            <Switch
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/mock_string"
-                android:id="@+id/ongoingCallSwitch"
-                android:layout_column="2"
-                android:checked="false"
-                android:layout_gravity="center_horizontal" />
-        </TableRow>
-
         <TableRow
             android:layout_width="match_parent"
             android:layout_height="match_parent">
             <TextView
-                android:textAppearance="?android:attr/textAppearanceSmall"
-                android:id="@+id/onGoingCallTextView"
-                android:layout_column="0" />
+                android:textAppearance="?android:attr/textAppearanceLarge"
+                android:id="@+id/someTextView2"
+                android:text="@string/dangerous_situations"
+                android:layout_column="0"
+                android:paddingTop="@dimen/place_autocomplete_progress_size" />
         </TableRow>
-
-        <!-- OnGoing Call Sensor Done -->
 
         <!-- Driving Sensor -->
         <TableRow
@@ -202,6 +191,49 @@
 
         <!-- Walking Sensor Done -->
 
+        <TableRow
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+            <TextView
+                android:textAppearance="?android:attr/textAppearanceLarge"
+                android:id="@+id/someTextView3"
+                android:text="@string/distractions"
+                android:layout_column="0"
+                android:paddingTop="@dimen/place_autocomplete_progress_size" />
+        </TableRow>
+
+        <!-- Ongoing Call Sensor -->
+        <TableRow
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <TextView
+                android:textAppearance="?android:attr/textAppearanceMedium"
+                android:text="@string/call_title"
+                android:id="@+id/textView13"
+                android:layout_column="0" />
+
+            <Switch
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/mock_string"
+                android:id="@+id/ongoingCallSwitch"
+                android:layout_column="2"
+                android:checked="false"
+                android:layout_gravity="center_horizontal" />
+        </TableRow>
+
+        <TableRow
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+            <TextView
+                android:textAppearance="?android:attr/textAppearanceSmall"
+                android:id="@+id/onGoingCallTextView"
+                android:layout_column="0" />
+        </TableRow>
+
+        <!-- OnGoing Call Sensor Done -->
+
         <!-- Keyboard Out Sensor -->
         <TableRow
             android:layout_width="match_parent"
@@ -231,7 +263,24 @@
                 android:id="@+id/keyboardTextView"
                 android:layout_column="0" />
         </TableRow>
-
         <!-- Keyboard Out Sensor Done -->
+
+        <TableRow
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+            <EditText
+                android:layout_width="@dimen/cast_libraries_material_featurehighlight_center_threshold"
+                android:layout_height="wrap_content"
+                android:inputType="textPersonName"
+                android:text="@string/just_type"
+                android:ems="10"
+                android:layout_marginLeft="23dp"
+                android:layout_marginStart="23dp"
+                android:id="@+id/editText2"
+                android:layout_column="0"
+                tools:layout_height="@dimen/cast_libraries_material_featurehighlight_text_horizontal_margin" />
+        </TableRow>
     </TableLayout>
+
 </RelativeLayout>
