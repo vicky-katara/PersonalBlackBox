@@ -3,8 +3,8 @@ package com.example.vickykatara.personalblackbox;
 import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -16,7 +16,6 @@ import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -32,20 +31,37 @@ import com.example.vickykatara.personalblackbox.types.AbsoluteEmergency;
 import com.example.vickykatara.personalblackbox.types.DangerousSituation;
 import com.example.vickykatara.personalblackbox.types.Distraction;
 import com.example.vickykatara.personalblackbox.types.Speed;
-import com.example.vickykatara.personalblackbox.utils.PhoneStateBroadcastReceiver;
 import com.example.vickykatara.personalblackbox.utils.SoundMeter;
 import com.google.android.gms.appindexing.Action;
 import com.google.android.gms.appindexing.AppIndex;
 import com.google.android.gms.appindexing.Thing;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.drive.Drive;
+import com.google.android.gms.drive.DriveApi;
+import com.google.android.gms.drive.DriveContents;
+import com.google.android.gms.drive.DriveFolder;
+import com.google.android.gms.drive.MetadataChangeSet;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
+import com.google.api.client.extensions.android.http.AndroidHttp;
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential;
+import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.services.drive.DriveScopes;
 
 import net.yslibrary.android.keyboardvisibilityevent.KeyboardVisibilityEvent;
 import net.yslibrary.android.keyboardvisibilityevent.KeyboardVisibilityEventListener;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity
@@ -53,6 +69,9 @@ public class MainActivity extends AppCompatActivity
                 GoogleApiClient.ConnectionCallbacks,
                 GoogleApiClient.OnConnectionFailedListener,
                 LocationListener {
+
+    private static final int REQUEST_CODE_RESOLUTION = 1;
+    private static final  int REQUEST_CODE_OPENER = 2;
 
     public static final double PRESSURE_CHANGE_THRESHOLD = 0.0008;
     public static final boolean DEBUG_MODE_ON = false;
@@ -71,13 +90,13 @@ public class MainActivity extends AppCompatActivity
 
     double lastCapturedPressure, newPressure;
     int lastCapturedSound;
-    private Location firstLocation, lastCapturedLocation;
+    Location firstLocation, lastCapturedLocation;
     Speed lastCapturedSpeed;
-    boolean isOnCall;
+    public boolean isOnCall;
     boolean isKeyboardDrawn;
 
-    private Set<AbsoluteEmergency> absoluteEmergencySet;
-    private Set<DangerousSituation> dangerousSituationsSet;
+    Set<AbsoluteEmergency> absoluteEmergencySet;
+    Set<DangerousSituation> dangerousSituationsSet;
     public Set<Distraction> distractionSet;
 
     private SensorManager mSensorManager;
@@ -103,6 +122,10 @@ public class MainActivity extends AppCompatActivity
     private Handler locationHandler;
     float lastCapturedLightIntensity;
     float lastCapturedProximityValue;
+    private Handler blackBoxDataHandler;
+    String numberOnCallWith;
+    private PhoneStateListener phoneStateListener;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -117,6 +140,8 @@ public class MainActivity extends AppCompatActivity
         mPressure = mSensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
         mLight = mSensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
         mProximity = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+
+        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
 
         if (mPressure == null)
             noPressureSensor = true;
@@ -226,19 +251,25 @@ public class MainActivity extends AppCompatActivity
 
 
         createSoundHandler();
+        createBlackBoxDataHandler();
 
-        createCellBroadcastReceiver();
+        createCallListener();
 
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
 //        client = new GoogleApiClient.Builder(this).addApi(AppIndex.API).build();
+
 
         client = new GoogleApiClient.Builder(this)
                 .addConnectionCallbacks(this)
                 .addOnConnectionFailedListener(this)
                 .addApi(LocationServices.API)
                 .addApi(AppIndex.API)
+                .addApi(Drive.API)
+                .addScope(Drive.SCOPE_FILE)
                 .build();
+
+        authorizeGoogleDrive();
 
         createLocationListener();
 
@@ -313,6 +344,107 @@ public class MainActivity extends AppCompatActivity
         this.updateKeyboardStrings();
     }
 
+    private void authorizeGoogleDrive() {
+        List<String> scopeList = new ArrayList<>(1);
+        scopeList.add(DriveScopes.DRIVE);
+        GoogleAccountCredential credential = GoogleAccountCredential.usingOAuth2(this,  scopeList);
+        String accountName = credential.getSelectedAccountName();
+        credential.setSelectedAccountName(accountName);
+        com.google.api.services.drive.Drive service = new com.google.api.services.drive.Drive.Builder(AndroidHttp.newCompatibleTransport(), new GsonFactory(), credential).build();
+    }
+
+    private String driveFileName;
+    private String driveFileContents;
+
+    public void uploadToDrive(String fileName, StringBuilder contents) {
+        makeAlertDialog("Uploading "+fileName+" to drive");
+        this.driveFileName = fileName;
+        this.driveFileContents = contents.toString();
+        // create new contents resource
+        Drive.DriveApi.newDriveContents(client)
+                .setResultCallback(driveContentsCallback);
+    }
+
+    private boolean fileOperation = true;
+
+    final ResultCallback<DriveApi.DriveContentsResult> driveContentsCallback =
+            new ResultCallback<DriveApi.DriveContentsResult>() {
+                @Override
+                public void onResult(DriveApi.DriveContentsResult result) {
+                    if (result.getStatus().isSuccess()) {
+                        if (fileOperation == true) {
+                            if(DEBUG_MODE_ON) makeAlertDialog(" Creating new File ");
+                            CreateFileOnGoogleDrive(result);
+                        } else {
+                            if(DEBUG_MODE_ON) makeAlertDialog(" Uploading to Existing File ");
+                            OpenFileFromGoogleDrive();
+                        }
+                    }
+                    else {
+                        makeAlertDialog(" Failed ---% ");
+                    }
+
+                }
+            };
+
+    public void CreateFileOnGoogleDrive(DriveApi.DriveContentsResult result){
+        final DriveContents driveContents = result.getDriveContents();
+        if(DEBUG_MODE_ON) makeAlertDialog(" Starting Upload to New File ");
+        // Perform I/O off the UI thread.
+        new Thread() {
+            @Override
+            public void run() {
+                // write content to DriveContents
+                OutputStream outputStream = driveContents.getOutputStream();
+                Writer writer = new OutputStreamWriter(outputStream);
+                try {
+                    writer.write(driveFileContents);
+                    writer.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
+                        .setTitle(driveFileName) // <--------------------------------------------------
+                        .setMimeType("text/plain")
+                        .setStarred(true).build();
+
+                // create a file in root folder
+                Drive.DriveApi.getRootFolder(client)
+                        .createFile(client, changeSet, driveContents)
+                        .setResultCallback(fileCallback);
+            }
+        }.start();
+
+        if(DEBUG_MODE_ON) makeAlertDialog("Upload Complete");
+    }
+
+    final private ResultCallback<DriveFolder.DriveFileResult> fileCallback = new
+            ResultCallback<DriveFolder.DriveFileResult>() {
+                @Override
+                public void onResult(DriveFolder.DriveFileResult result) {
+                    if (result.getStatus().isSuccess()) {
+                        makeAlertDialog("Upload Completed. ID: "+result.getDriveFile().getDriveId());
+                        if(DEBUG_MODE_ON)
+                            Toast.makeText(getApplicationContext(), "file created: "+""+
+                                result.getDriveFile().getDriveId(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            };
+
+    private void OpenFileFromGoogleDrive() {
+        IntentSender intentSender = Drive.DriveApi
+                .newOpenFileActivityBuilder()
+                .setMimeType(new String[] { "text/plain", "text/html" })
+                .build(client);
+        try {
+            startIntentSenderForResult(
+                    intentSender, REQUEST_CODE_OPENER, null, 0, 0, 0);
+        } catch (IntentSender.SendIntentException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void createSoundHandler() {
         checkPermission();
         soundHandler = new Handler() {
@@ -324,15 +456,23 @@ public class MainActivity extends AppCompatActivity
         };
     }
 
+    private void createBlackBoxDataHandler() {
+        checkPermission();
+        blackBoxDataHandler = new Handler() {
+            public void handleMessage(Message msg) {
+                double amplitude = msg.getData().getDouble("amplitude");
+                String messageStr = msg.getData().getString("msg");
+                makeAlertDialog(messageStr);
+            }
+        };
+    }
+
     public void checkEmergencySituations() {
         if(DEBUG_MODE_ON) makeAlertDialog(getSetReps());
         if( (absoluteEmergencySet.isEmpty() == false )||
-                (dangerousSituationsSet.isEmpty() == false && distractionSet.isEmpty() == false ))
-            captureBlackboxData();
-    }
-
-    private void captureBlackboxData() {
-
+                (dangerousSituationsSet.isEmpty() == false && distractionSet.isEmpty() == false )) {
+            BlackBoxDataCapture.startOrContinueRecording(this);
+        }
     }
 
     private String getSetReps() {
@@ -405,21 +545,61 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    private void createCellBroadcastReceiver() {
-
-        broadcastReceiver = new PhoneStateBroadcastReceiver(this);
-
-        callIntentFilter = new IntentFilter();
-        callIntentFilter.addAction(Intent.ACTION_NEW_OUTGOING_CALL);
-        callIntentFilter.addAction(Intent.ACTION_CALL);
-        callIntentFilter.addAction(Intent.EXTRA_PHONE_NUMBER);
-
-        registerReceiver(broadcastReceiver, callIntentFilter);
-
-        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
-
-        telephonyManager.listen(((PhoneStateBroadcastReceiver)broadcastReceiver).customPhoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+    private void createCallListener() {
+        phoneStateListener = new PhoneStateListener() {
+            @Override
+            public void onCallStateChanged(int state, String number) {
+                checkCallEmergency(state, number);
+            }
+        };
+        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
     }
+
+    private void checkCallEmergency(int state, String number) {
+        switch (state) {
+            case TelephonyManager.CALL_STATE_RINGING:
+                markOnCall(number);
+                updateOnCallStrings();
+                break;
+            case TelephonyManager.CALL_STATE_OFFHOOK:
+                markOnCall(number);
+                break;
+            case TelephonyManager.CALL_STATE_IDLE:
+                markOffCall();
+                break;
+        }
+    }
+
+    private void markOnCall(String number) {
+        isOnCall = true;
+        numberOnCallWith = number;
+        distractionSet.add(Distraction.ONGOING_CALL);
+        updateOnCallStrings();
+        checkEmergencySituations();
+    }
+
+    private void markOffCall() {
+        isOnCall = false;
+        this.numberOnCallWith = "";
+        distractionSet.remove(Distraction.ONGOING_CALL);
+        updateOnCallStrings();
+    }
+
+//    private void createCellBroadcastReceiver3() {
+//
+//        broadcastReceiver = new PhoneStateBroadcastReceiver(this);
+//
+//        callIntentFilter = new IntentFilter();
+//        callIntentFilter.addAction(Intent.ACTION_NEW_OUTGOING_CALL);
+//        callIntentFilter.addAction(Intent.ACTION_CALL);
+//        callIntentFilter.addAction(Intent.EXTRA_PHONE_NUMBER);
+//
+//        registerReceiver(broadcastReceiver, callIntentFilter);
+//
+//        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+//
+//        telephonyManager.listen(((PhoneStateBroadcastReceiver)broadcastReceiver).customPhoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+//    }
 
 //    private void createCellBroadcastReceiver2() {
 //
@@ -466,7 +646,7 @@ public class MainActivity extends AppCompatActivity
 
     public void updateOnCallStrings() {
         if (mockCall == false) {
-            ((TextView) findViewById(R.id.onGoingCallTextView)).setText((isOnCall ? "On Call !!! " : "Not on a Call"));
+            ((TextView) findViewById(R.id.onGoingCallTextView)).setText((isOnCall ? "Call with "+numberOnCallWith+"!!! " : "Not on a Call"));
         }
     }
 
@@ -498,9 +678,9 @@ public class MainActivity extends AppCompatActivity
     public void onStart() {
         super.onStart();
 
-        registerReceiver(broadcastReceiver, callIntentFilter);
-
-//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+//        registerReceiver(broadcastReceiver, callIntentFilter);
+        if(phoneStateListener != null)
+            telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
         soundGenerator = new Thread(new SoundCaptureThread());
         soundGenerator.start();
 //        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
@@ -515,7 +695,8 @@ public class MainActivity extends AppCompatActivity
     public void onStop() {
         super.onStop();
 
-//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
+        if(phoneStateListener != null)
+            telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
         soundGenerator.interrupt();
 
 //        unregisterReceiver(broadcastReceiver);
@@ -523,7 +704,13 @@ public class MainActivity extends AppCompatActivity
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
         AppIndex.AppIndexApi.end(client, getIndexApiAction());
-        client.disconnect();
+//        client.disconnect();
+
+        if (client != null) {
+
+            // disconnect Google API client connection
+            client.disconnect();
+        }
     }
 
     @Override
@@ -534,9 +721,29 @@ public class MainActivity extends AppCompatActivity
         mSensorManager.registerListener(this, mProximity, SensorManager.SENSOR_DELAY_NORMAL);
         soundGenerator = new Thread(new SoundCaptureThread());
         soundGenerator.start();
+        if(phoneStateListener != null)
+            telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
 //        telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
 //        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
-        registerReceiver(broadcastReceiver, callIntentFilter);
+//        registerReceiver(broadcastReceiver, callIntentFilter);
+        if (client == null) {
+
+            /**
+             * Create the API client and bind it to an instance variable.
+             * We use this instance as the callback for connection and connection failures.
+             * Since no account name is passed, the user is prompted to choose.
+             */
+            client = new GoogleApiClient.Builder(this)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .addApi(LocationServices.API)
+                    .addApi(AppIndex.API)
+                    .addApi(Drive.API)
+                    .addScope(Drive.SCOPE_FILE)
+                    .build();
+        }
+
+        client.connect();
     }
 
     @Override
@@ -544,18 +751,16 @@ public class MainActivity extends AppCompatActivity
         // Be sure to unregister the sensor when the activity pauses.
         super.onPause();
         mSensorManager.unregisterListener(this);
-//        telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
-        unregisterReceiver(broadcastReceiver);
+        if(phoneStateListener != null)
+            telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
+//        unregisterReceiver(broadcastReceiver);
+
     }
 
     private void createLocationListener() {
         createLocationHandler();
         if (client == null) {
-            client = new GoogleApiClient.Builder(this)
-                    .addConnectionCallbacks(this)
-                    .addOnConnectionFailedListener(this)
-                    .addApi(LocationServices.API)
-                    .build();
+            makeAlertDialog("No Client");
         }
 
         locationRequest = LocationRequest.create();
@@ -685,7 +890,6 @@ public class MainActivity extends AppCompatActivity
         } else {
             speedStr = "--";
         }
-
         if (mockDriving == false) {
             ((TextView) findViewById(R.id.drivingTextView)).setText(speedStr+" m/s"+(speed >= Speed.MINIMUM_DRIVING_SPEED ? " !!! ":""));
         }
@@ -701,8 +905,29 @@ public class MainActivity extends AppCompatActivity
     public void onConnectionSuspended(int i) {}
 
     @Override
-    public void onConnectionFailed(@NonNull com.google.android.gms.common.ConnectionResult connectionResult) {
+    public void onConnectionFailed(ConnectionResult result) {
+        // Called whenever the API client fails to connect.
+        makeAlertDialog("GoogleApiClient connection failed: " + result.toString());
+        if (!result.hasResolution()) {
+            // show the localized error dialog.
+            GoogleApiAvailability.getInstance().getErrorDialog(this, result.getErrorCode(), 0).show();
+            return;
+        }
+        /**
+         *  The failure has a resolution. Resolve it.
+         *  Called typically when the app is not yet authorized, and an  authorization
+         *  dialog is displayed to the user.
+         */
+        try {
+            result.startResolutionForResult(this, REQUEST_CODE_RESOLUTION);
+        } catch (IntentSender.SendIntentException e) {
+            e.printStackTrace();
+            makeAlertDialog("Exception while starting resolution activity");
+        }
+    }
 
+    public Handler getBlackBoxDataHandler() {
+        return blackBoxDataHandler;
     }
 
     private class SoundCaptureThread implements Runnable {
@@ -758,6 +983,7 @@ public class MainActivity extends AppCompatActivity
         int audioPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO);
         int locationPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION);
         int phonePermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE);
+        int accountsPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.GET_ACCOUNTS);
 
         // If we don't have permissions, ask user for permissions
         if (storagePermission != PackageManager.PERMISSION_GRANTED) {
@@ -815,6 +1041,20 @@ public class MainActivity extends AppCompatActivity
                     this,
                     PERMISSIONS_STORAGE,
                     REQUEST_PHONE_UPDATES
+            );
+        }
+
+        // If we don't have permissions, ask user for permissions
+        if (accountsPermission != PackageManager.PERMISSION_GRANTED) {
+            String[] PERMISSIONS_ACCOUNTS = {
+                    Manifest.permission.GET_ACCOUNTS
+            };
+            int REQUEST_ACCOUNTS = 1;
+
+            ActivityCompat.requestPermissions(
+                    this,
+                    PERMISSIONS_ACCOUNTS,
+                    REQUEST_ACCOUNTS
             );
         }
     }
