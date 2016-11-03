@@ -3,6 +3,7 @@ package com.example.vickykatara.personalblackbox;
 import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.IntentSender;
 import android.content.pm.PackageManager;
@@ -70,6 +71,9 @@ public class MainActivity extends AppCompatActivity
                 GoogleApiClient.OnConnectionFailedListener,
                 LocationListener {
 
+    private static final String NO_PHONE_NUMBER_STRING = "<NOT_AVAILABLE>";
+    private static MainActivity staticInstance;
+
     private static final int REQUEST_CODE_RESOLUTION = 1;
     private static final  int REQUEST_CODE_OPENER = 2;
 
@@ -131,6 +135,8 @@ public class MainActivity extends AppCompatActivity
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        staticInstance = this;
 
         this.absoluteEmergencySet = new HashSet<>();
         this.dangerousSituationsSet = new HashSet<>();
@@ -555,6 +561,24 @@ public class MainActivity extends AppCompatActivity
         telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
     }
 
+    public static class OutgoingCallReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if(DEBUG_MODE_ON && staticInstance != null)
+                staticInstance.makeAlertDialog(" 80808080 -> "+intent.getAction()+":::"+intent.getStringExtra(TelephonyManager.EXTRA_STATE));
+            String stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
+            int state;
+            if(stateStr.equals(TelephonyManager.EXTRA_STATE_RINGING))
+                state = TelephonyManager.CALL_STATE_RINGING;
+            else if(stateStr.equals(TelephonyManager.EXTRA_STATE_OFFHOOK))
+                state = TelephonyManager.CALL_STATE_OFFHOOK;
+            else
+                state = TelephonyManager.CALL_STATE_IDLE;
+            if(staticInstance != null)
+                staticInstance.checkCallEmergency(state, intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER));
+        }
+    }
+
     private void checkCallEmergency(int state, String number) {
         switch (state) {
             case TelephonyManager.CALL_STATE_RINGING:
@@ -646,7 +670,7 @@ public class MainActivity extends AppCompatActivity
 
     public void updateOnCallStrings() {
         if (mockCall == false) {
-            ((TextView) findViewById(R.id.onGoingCallTextView)).setText((isOnCall ? "Call with "+numberOnCallWith+"!!! " : "Not on a Call"));
+            ((TextView) findViewById(R.id.onGoingCallTextView)).setText((isOnCall ? "Call with "+(numberOnCallWith != null ? numberOnCallWith : NO_PHONE_NUMBER_STRING)+"!!! " : "Not on a Call"));
         }
     }
 

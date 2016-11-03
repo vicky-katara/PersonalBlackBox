@@ -36,6 +36,12 @@
                 <action android:name="android.intent.action.NEW_OUTGOING_CALL"/>
             </intent-filter>
         </receiver>
+        <receiver android:name=".MainActivity$OutgoingCallReceiver" >
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE"/>
+                <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
+            </intent-filter>
+        </receiver>
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="774515555173-qhh2ovsb5p6b9h7nk2v5s0t7qdh2ons3.apps.googleusercontent.com" />
